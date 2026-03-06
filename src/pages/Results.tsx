@@ -1,42 +1,80 @@
 import { useState, useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ArrowLeft, Scale, Clock, DollarSign, AlertTriangle, Shield, MessageSquare } from "lucide-react";
+import { ArrowLeft, Scale, Clock, DollarSign, AlertTriangle, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { SeverityBadge } from "@/components/SeverityBadge";
 import { LoadingSpinner } from "@/components/LoadingSpinner";
-import { mockResults, similarCases, type CrimeResult } from "@/lib/mockData";
 import { SimilarCasesSection } from "@/components/SimilarCasesSection";
 import { AIExplanationPanel } from "@/components/AIExplanationPanel";
 import { CrimeCharts } from "@/components/CrimeCharts";
+import { similarCases } from "@/lib/mockData";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
+
+interface AIResult {
+  crime_type: string;
+  law_sections: string[];
+  punishment: string;
+  fine: string;
+  severity: "Low" | "Medium" | "High" | "Critical";
+  bailable: boolean;
+  explanation: string;
+}
 
 const Results = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const crime = (location.state as any)?.crime || "";
   const [loading, setLoading] = useState(true);
-  const [result, setResult] = useState<CrimeResult | null>(null);
+  const [result, setResult] = useState<AIResult | null>(null);
 
   useEffect(() => {
     if (!crime) {
       navigate("/");
       return;
     }
-    const timer = setTimeout(() => {
-      setResult({ ...mockResults.default, crime });
-      setLoading(false);
-    }, 1800);
-    return () => clearTimeout(timer);
+
+    const analyzeCrime = async () => {
+      try {
+        const { data, error } = await supabase.functions.invoke("analyze-crime", {
+          body: { crime },
+        });
+
+        if (error) {
+          console.error("Edge function error:", error);
+          toast.error("Failed to analyze crime. Please try again.");
+          navigate("/");
+          return;
+        }
+
+        if (data?.error) {
+          toast.error(data.error);
+          navigate("/");
+          return;
+        }
+
+        setResult(data as AIResult);
+      } catch (err) {
+        console.error("Error:", err);
+        toast.error("Something went wrong. Please try again.");
+        navigate("/");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    analyzeCrime();
   }, [crime, navigate]);
 
   if (loading) return <LoadingSpinner />;
   if (!result) return null;
 
   const infoCards = [
-    { icon: Scale, label: "Law Section", value: result.lawSection, color: "text-primary" },
+    { icon: Scale, label: "Law Sections", value: result.law_sections.join(", "), color: "text-primary" },
     { icon: Clock, label: "Punishment", value: result.punishment, color: "text-destructive" },
-    { icon: DollarSign, label: "Fine Amount", value: result.fineAmount, color: "text-warning" },
+    { icon: DollarSign, label: "Fine", value: result.fine, color: "text-warning" },
     { icon: Shield, label: "Bail Status", value: result.bailable ? "Bailable" : "Non-Bailable", color: result.bailable ? "text-success" : "text-destructive" },
   ];
 
@@ -49,10 +87,10 @@ const Results = () => {
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
         <Card className="p-5 border-l-4 border-l-primary">
           <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider font-medium">Crime Description</p>
-          <p className="text-foreground text-sm">{result.crime}</p>
+          <p className="text-foreground text-sm">{crime}</p>
           <div className="mt-3 flex items-center gap-2">
             <SeverityBadge severity={result.severity} />
-            <span className="text-xs text-muted-foreground">Severity Level</span>
+            <span className="text-xs text-muted-foreground">• {result.crime_type}</span>
           </div>
         </Card>
       </motion.div>
